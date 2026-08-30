@@ -210,25 +210,34 @@
     background:var(--card);font-family:var(--mono);font-size:11px;
     padding:8px 4px;text-align:center;color:var(--ink-soft);
     border-right:1px solid var(--line);border-bottom:1px solid var(--line);
-    min-height:60px;
+    height:40px;
     font-weight:600;
+    display:flex;align-items:center;justify-content:center;
   }
   .calendar-cell{
-    background:var(--card);position:relative;min-height:60px;
+    background:var(--card);position:relative;height:40px;
     border-bottom:1px solid var(--line);
-    overflow:hidden;
+    overflow:visible;
   }
-  .shift-block{
-    position:absolute;left:0;right:0;
-    background:var(--accent-soft);border-left:3px solid var(--accent);
-    padding:4px 6px;font-size:11px;font-weight:600;
+  .day-column-wrapper{
+    position:relative;
+    background:var(--card);
+  }
+  .avail-block{
+    position:absolute;
+    padding:3px 6px;font-size:10.5px;font-weight:700;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    border-radius:2px;
-    color:var(--ink);
+    border-radius:4px;
+    color:#111;
+    box-shadow:0 1px 3px rgba(0,0,0,0.1);
+    cursor:pointer;
+    border-left:3px solid rgba(0,0,0,0.3);
+    transition:all .15s;
   }
-  .shift-block:hover{
-    box-shadow:0 2px 8px rgba(0,0,0,0.1);
-    z-index:10;
+  .avail-block:hover{
+    box-shadow:0 3px 10px rgba(0,0,0,0.2);
+    z-index:100;
+    transform:scale(1.02);
   }
 
   .calendar-info{
@@ -246,6 +255,18 @@
   .overlap-badge{
     display:inline-block;background:#ff6b6b;color:#fff;font-size:10px;
     font-weight:700;padding:2px 6px;border-radius:12px;
+  }
+  .avail-legend{
+    display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;
+    padding:12px;background:var(--card);border-radius:8px;
+    border:1px solid var(--line);
+  }
+  .legend-item{
+    display:flex;align-items:center;gap:6px;font-size:12px;
+    font-weight:600;
+  }
+  .legend-swatch{
+    width:14px;height:14px;border-radius:3px;
   }
 </style>
 </head>
@@ -268,7 +289,7 @@
   <!-- View Tabs -->
   <div class="view-tabs">
     <button class="tab-btn active" data-view="planner">📋 Planner</button>
-    <button class="tab-btn" data-view="calendar">📅 Calendar View</button>
+    <button class="tab-btn" data-view="calendar">📅 Availability View</button>
   </div>
 
   <!-- PLANNER VIEW -->
@@ -289,20 +310,21 @@
 
   <!-- CALENDAR VIEW -->
   <div id="calendar" class="view-content">
+    <div class="avail-legend" id="availLegend"></div>
     <div class="calendar-wrapper">
       <div class="calendar-grid" id="calendarGrid"></div>
     </div>
     <div class="calendar-info">
       <div class="info-card">
-        <div class="info-title">Coverage Summary</div>
+        <div class="info-title">Available Staff by Day</div>
         <div class="info-list" id="coverageSummary"></div>
       </div>
       <div class="info-card">
-        <div class="info-title">Peak Hours</div>
+        <div class="info-title">Peak Availability Hours</div>
         <div class="info-list" id="peakHours"></div>
       </div>
       <div class="info-card">
-        <div class="info-title">Gaps</div>
+        <div class="info-title">Coverage Gaps</div>
         <div class="info-list" id="gapsList"></div>
       </div>
     </div>
@@ -340,7 +362,24 @@ function getWeekDates(){
   return dates;
 }
 
+// Detect if running on a server (has /api/data endpoint) or standalone
+const USE_SERVER = window.location.protocol !== 'file:';
+
 async function loadState(){
+  if(USE_SERVER){
+    try {
+      const res = await fetch('/api/data');
+      if(res.ok){
+        const state = await res.json();
+        employees = state.employees || [];
+        schedule = state.schedule || {};
+        return;
+      }
+    } catch(e){
+      console.warn('Server unavailable, using localStorage', e);
+    }
+  }
+  // Fallback to localStorage
   const saved = localStorage.getItem('shiftPlannerState');
   if(saved) {
     const state = JSON.parse(saved);
@@ -351,7 +390,40 @@ async function loadState(){
 
 async function saveSchedule(){
   const state = { employees, schedule };
+  // Always save to localStorage as backup
   localStorage.setItem('shiftPlannerState', JSON.stringify(state));
+  
+  if(USE_SERVER){
+    try {
+      await fetch('/api/data', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(state)
+      });
+    } catch(e){
+      console.warn('Failed to save to server', e);
+    }
+  }
+}
+
+// Auto-refresh from server every 10 seconds when on server
+if(USE_SERVER){
+  setInterval(async ()=>{
+    try {
+      const res = await fetch('/api/data');
+      if(res.ok){
+        const state = await res.json();
+        const newData = JSON.stringify(state);
+        const currentData = JSON.stringify({employees, schedule});
+        if(newData !== currentData){
+          employees = state.employees || [];
+          schedule = state.schedule || {};
+          renderSidebar();
+          renderWeek();
+        }
+      }
+    } catch(e){}
+  }, 10000);
 }
 
 function generateId(){
@@ -407,12 +479,28 @@ function showEditForm(empId){
       <div class="color-pick" id="colorPick"></div>
     </div>
     <div class="form-field">
-      <label>Availability</label>
-      <input type="text" id="empAvail" value="${emp.availability||''}" placeholder="e.g. Weekdays 9am-5pm">
+      <label style="font-size:12px; margin-bottom:10px; display:block;">Availability by Day (e.g. 10:30am-5pm)</label>
+      <div class="days-table">`;
+  
+  const dayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const dayShortcuts = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  
+  dayLabels.forEach((day, idx)=>{
+    const avail = emp.dayAvailability ? emp.dayAvailability[dayShortcuts[idx]] || '' : '';
+    html += `
+      <div class="day-line">
+        <input type="checkbox" id="day-${idx}" ${avail ? 'checked' : ''}>
+        <div class="dname">${day}</div>
+        <input type="text" id="time-${idx}" value="${avail}" placeholder="10:30am-5pm" ${!avail ? 'disabled' : ''}>
+      </div>`;
+  });
+  
+  html += `
+      </div>
     </div>
     <div class="form-field">
-      <label>Hours needed per week</label>
-      <input type="number" id="empHours" value="${emp.hoursNeeded||''}">
+      <label>General notes</label>
+      <input type="text" id="empNotes" value="${emp.notes||''}" placeholder="e.g. Prefers afternoons">
     </div>
     <div class="form-actions">
       <button class="btn btn-primary" onclick="updateEmployee('${empId}')">Save</button>
@@ -421,6 +509,20 @@ function showEditForm(empId){
   </div>`;
 
   document.getElementById('editPanel').innerHTML = html;
+
+  // Toggle availability input based on checkbox
+  dayShortcuts.forEach((day, idx)=>{
+    const checkbox = document.getElementById(`day-${idx}`);
+    const input = document.getElementById(`time-${idx}`);
+    checkbox.onchange = ()=>{
+      if(checkbox.checked){
+        input.disabled = false;
+        input.focus();
+      } else {
+        input.disabled = true;
+      }
+    };
+  });
 
   const colorPick = document.getElementById('colorPick');
   COLORS.forEach(c=>{
@@ -440,8 +542,19 @@ function updateEmployee(empId){
   if(!emp) return;
   emp.name = document.getElementById('empName').value.trim() || 'Unnamed';
   emp.color = document.querySelector('.color-dot.sel').style.background;
-  emp.availability = document.getElementById('empAvail').value;
-  emp.hoursNeeded = document.getElementById('empHours').value;
+  emp.notes = document.getElementById('empNotes').value;
+  
+  // Save day availability
+  emp.dayAvailability = {};
+  const dayShortcuts = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  dayShortcuts.forEach((day, idx)=>{
+    const checkbox = document.getElementById(`day-${idx}`);
+    if(checkbox && checkbox.checked){
+      const timeInput = document.getElementById(`time-${idx}`);
+      emp.dayAvailability[day] = timeInput.value.trim();
+    }
+  });
+  
   saveSchedule();
   renderSidebar();
   renderWeek();
@@ -531,103 +644,185 @@ function renderWeek(){
 
 function renderCalendarView(){
   const dates = getWeekDates();
+  const dayShortcuts = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const grid = document.getElementById('calendarGrid');
   grid.innerHTML = '';
 
+  // Render legend
+  const legend = document.getElementById('availLegend');
+  legend.innerHTML = '<strong style="font-size:12px;margin-right:8px;">Team:</strong>';
+  if(employees.length === 0){
+    legend.innerHTML += '<span style="color:var(--ink-soft);font-size:12px;">No team members yet. Add them in the Planner tab.</span>';
+  } else {
+    employees.forEach(emp=>{
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `<div class="legend-swatch" style="background:${emp.color}"></div>${emp.name}`;
+      legend.appendChild(item);
+    });
+  }
+
+  // Time range: 6am to 11pm
+  const START_HOUR = 6;
+  const END_HOUR = 23;
+  const HOUR_HEIGHT = 40; // pixels per hour
+  const TOTAL_HEIGHT = (END_HOUR - START_HOUR) * HOUR_HEIGHT;
+
   // Header row
-  grid.appendChild(createEl('div', 'time-header', ''));
+  grid.appendChild(createEl('div', 'time-header', 'Time'));
   dates.forEach(d=>{
-    const header = createEl('div', 'day-header', `${DAY_NAMES[d.getDay()]}<br>${d.getMonth()+1}/${d.getDate()}`);
+    const isToday = fmtISO(new Date()) === fmtISO(d);
+    const header = createEl('div', 'day-header', 
+      `${DAY_NAMES[d.getDay()]}<br><span style="font-family:var(--mono);font-size:11px;opacity:.7;">${d.getMonth()+1}/${d.getDate()}</span>`);
+    if(isToday) header.style.background = 'var(--accent)';
     grid.appendChild(header);
   });
 
-  // Time slots (8am to 6pm)
-  for(let h=8; h<=18; h++){
-    const timeLabel = h<=12 ? `${h}am` : (h===12 ? '12pm' : `${h-12}pm`);
-    const timeCell = createEl('div', 'time-slot', timeLabel);
-    grid.appendChild(timeCell);
-
-    dates.forEach(d=>{
-      const iso = fmtISO(d);
-      const cell = createEl('div', 'calendar-cell');
-      const shifts = (schedule[iso]||[]).filter(s=>{
-        const start = parseStartMinutes(s.time);
-        const hourMin = h*60;
-        return start < hourMin && start >= (h-1)*60;
-      });
-
-      shifts.forEach((shift, idx)=>{
-        const emp = employees.find(e=>e.id===shift.employeeId);
-        if(!emp) return;
-        const block = createEl('div', 'shift-block', `${emp.name} ${shift.time||''}`);
-        block.style.background = emp.color;
-        block.style.top = (idx*22)+'px';
-        cell.appendChild(block);
-      });
-
-      grid.appendChild(cell);
-    });
+  // Time labels column
+  const timeCol = document.createElement('div');
+  timeCol.style.cssText = `background:var(--card);position:relative;height:${TOTAL_HEIGHT}px;`;
+  for(let h = START_HOUR; h < END_HOUR; h++){
+    const label = document.createElement('div');
+    label.style.cssText = `position:absolute;top:${(h-START_HOUR)*HOUR_HEIGHT}px;left:0;right:0;height:${HOUR_HEIGHT}px;
+      display:flex;align-items:flex-start;justify-content:center;padding-top:2px;
+      font-family:var(--mono);font-size:11px;color:var(--ink-soft);font-weight:600;
+      border-top:1px solid var(--line);`;
+    label.textContent = h < 12 ? `${h}am` : (h === 12 ? '12pm' : `${h-12}pm`);
+    timeCol.appendChild(label);
   }
+  grid.appendChild(timeCol);
+
+  // Day columns with availability blocks
+  dates.forEach(d=>{
+    const dayKey = dayShortcuts[d.getDay()];
+    const dayCol = document.createElement('div');
+    dayCol.style.cssText = `background:var(--card);position:relative;height:${TOTAL_HEIGHT}px;`;
+    
+    // Add hour grid lines
+    for(let h = START_HOUR; h < END_HOUR; h++){
+      const line = document.createElement('div');
+      line.style.cssText = `position:absolute;top:${(h-START_HOUR)*HOUR_HEIGHT}px;left:0;right:0;height:${HOUR_HEIGHT}px;
+        border-top:1px solid var(--line);`;
+      // Add half-hour line
+      const halfLine = document.createElement('div');
+      halfLine.style.cssText = `position:absolute;top:${HOUR_HEIGHT/2}px;left:0;right:0;
+        border-top:1px dashed #f0ede5;`;
+      line.appendChild(halfLine);
+      dayCol.appendChild(line);
+    }
+
+    // Collect available employees for this day
+    const availableEmps = employees.filter(emp=>{
+      return emp.dayAvailability && emp.dayAvailability[dayKey];
+    });
+
+    // Calculate column width for each employee
+    const numEmps = availableEmps.length;
+    availableEmps.forEach((emp, idx)=>{
+      const timeStr = emp.dayAvailability[dayKey];
+      const {start, end} = parseTime(timeStr);
+      if(start === 9999 || end === 9999) return;
+      
+      const startMin = start;
+      const endMin = end;
+      const startOffset = ((startMin/60) - START_HOUR) * HOUR_HEIGHT;
+      const duration = ((endMin - startMin) / 60) * HOUR_HEIGHT;
+      
+      const widthPercent = 100 / numEmps;
+      const leftPercent = idx * widthPercent;
+
+      const block = document.createElement('div');
+      block.className = 'avail-block';
+      block.style.cssText = `
+        top:${startOffset}px;
+        left:calc(${leftPercent}% + 2px);
+        width:calc(${widthPercent}% - 4px);
+        height:${duration}px;
+        background:${emp.color};
+        border-left-color:${darkenColor(emp.color)};
+      `;
+      block.innerHTML = `<div style="font-size:11px;font-weight:700;">${emp.name}</div>
+        <div style="font-size:9.5px;opacity:.85;font-family:var(--mono);margin-top:1px;">${timeStr}</div>`;
+      block.title = `${emp.name}: ${timeStr}`;
+      dayCol.appendChild(block);
+    });
+
+    grid.appendChild(dayCol);
+  });
+
+  // Adjust grid template for the new layout
+  grid.style.gridTemplateRows = `auto ${TOTAL_HEIGHT}px`;
 
   updateCalendarInfo();
 }
 
+function darkenColor(hex){
+  // Convert to darker shade for border
+  if(!hex || !hex.startsWith('#')) return 'rgba(0,0,0,0.3)';
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgb(${Math.max(0,r-40)}, ${Math.max(0,g-40)}, ${Math.max(0,b-40)})`;
+}
+
 function updateCalendarInfo(){
   const dates = getWeekDates();
-  const coverage = {};
-  const allShifts = {};
+  const dayShortcuts = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
+  // Available Staff by Day
+  let coverageHtml = '';
   dates.forEach(d=>{
-    const iso = fmtISO(d);
-    coverage[iso] = (schedule[iso]||[]).length;
-    DAY_NAMES[d.getDay()].split('').forEach(l=>{
-      if(!allShifts[DAY_NAMES[d.getDay()]]) allShifts[DAY_NAMES[d.getDay()]] = [];
-      if((schedule[iso]||[]).length > 0){
-        allShifts[DAY_NAMES[d.getDay()]] = (schedule[iso]||[]).map(s=>{
-          const emp = employees.find(e=>e.id===s.employeeId);
-          return emp ? emp.name : 'Unknown';
-        });
+    const dayKey = dayShortcuts[d.getDay()];
+    const availEmps = employees.filter(emp=> emp.dayAvailability && emp.dayAvailability[dayKey]);
+    const badge = availEmps.length >= 3 ? `<span class="overlap-badge">${availEmps.length}</span>` : '';
+    const names = availEmps.map(e=>e.name).join(', ') || 'nobody';
+    coverageHtml += `<div class="info-item"><strong>${DAY_NAMES[d.getDay()]}:</strong> ${names} ${badge}</div>`;
+  });
+  document.getElementById('coverageSummary').innerHTML = coverageHtml || '<div class="empty-note">No availability set</div>';
+
+  // Peak availability hours (which hours have the most people available across the week)
+  const hourCounts = {};
+  for(let h = 6; h < 23; h++) hourCounts[h] = 0;
+  
+  dates.forEach(d=>{
+    const dayKey = dayShortcuts[d.getDay()];
+    employees.forEach(emp=>{
+      if(emp.dayAvailability && emp.dayAvailability[dayKey]){
+        const {start, end} = parseTime(emp.dayAvailability[dayKey]);
+        if(start === 9999) return;
+        for(let h = 6; h < 23; h++){
+          const hMin = h*60;
+          if(start <= hMin && end > hMin) hourCounts[h]++;
+        }
       }
     });
   });
 
-  // Coverage summary
-  let coverageHtml = '';
-  Object.entries(coverage).forEach(([iso, count])=>{
-    const d = new Date(iso+'T00:00:00');
-    const dayName = DAY_NAMES[d.getDay()];
-    const badge = count > 2 ? '<span class="overlap-badge">'+count+'</span>' : '';
-    coverageHtml += `<div class="info-item">${dayName}: ${count} staff ${badge}</div>`;
-  });
-  document.getElementById('coverageSummary').innerHTML = coverageHtml || '<div class="empty-note">No shifts planned</div>';
-
-  // Peak hours
   let peakHtml = '';
-  for(let h=8; h<=18; h++){
-    let count = 0;
-    dates.forEach(d=>{
-      const iso = fmtISO(d);
-      count += (schedule[iso]||[]).filter(s=>{
-        const start = parseStartMinutes(s.time);
-        return start < h*60 && start >= (h-1)*60;
-      }).length;
-    });
-    if(count > 1){
-      const time = h<=12 ? `${h}am` : `${h-12}pm`;
-      peakHtml += `<div class="info-item">${time}: ${count} staff</div>`;
-    }
-  }
-  document.getElementById('peakHours').innerHTML = peakHtml || '<div class="empty-note">No overlaps</div>';
+  const sortedHours = Object.entries(hourCounts)
+    .filter(([h,c]) => c > 0)
+    .sort((a,b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  sortedHours.forEach(([h, count])=>{
+    const hour = parseInt(h);
+    const time = hour < 12 ? `${hour}am` : (hour === 12 ? '12pm' : `${hour-12}pm`);
+    peakHtml += `<div class="info-item">${time}: ${count} staff-slots available</div>`;
+  });
+  document.getElementById('peakHours').innerHTML = peakHtml || '<div class="empty-note">No availability set</div>';
 
-  // Gaps
+  // Coverage gaps (days with nobody available)
   let gapsHtml = '';
   dates.forEach(d=>{
-    const iso = fmtISO(d);
-    if(!schedule[iso] || schedule[iso].length===0){
-      gapsHtml += `<div class="info-item">🚫 ${DAY_NAMES[d.getDay()]} (${d.getMonth()+1}/${d.getDate()}): No coverage</div>`;
+    const dayKey = dayShortcuts[d.getDay()];
+    const availCount = employees.filter(emp=> emp.dayAvailability && emp.dayAvailability[dayKey]).length;
+    if(availCount === 0){
+      gapsHtml += `<div class="info-item">🚫 ${DAY_NAMES[d.getDay()]} (${d.getMonth()+1}/${d.getDate()}): No one available</div>`;
+    } else if(availCount === 1){
+      gapsHtml += `<div class="info-item">⚠️ ${DAY_NAMES[d.getDay()]}: Only 1 person available</div>`;
     }
   });
-  document.getElementById('gapsList').innerHTML = gapsHtml || '<div class="empty-note">Full coverage</div>';
+  document.getElementById('gapsList').innerHTML = gapsHtml || '<div class="info-item" style="color:var(--good)">✓ Multiple people available every day</div>';
 }
 
 function createEl(tag, cls, html){
@@ -720,15 +915,37 @@ document.getElementById('todayBtn').onclick = ()=>{
   renderWeek();
 };
 
+function parseTime(timeStr){
+  // Returns {start: minutes, end: minutes} for a time range like "3pm-9pm" or "3-9"
+  if(!timeStr) return {start: 9999, end: 9999};
+  
+  const m = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?\s*-\s*(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
+  if(!m) return {start: 9999, end: 9999};
+  
+  let h1 = parseInt(m[1],10);
+  const min1 = m[2] ? parseInt(m[2],10) : 0;
+  let ap1 = (m[3]||'').toLowerCase();
+  
+  let h2 = parseInt(m[4],10);
+  const min2 = m[5] ? parseInt(m[5],10) : 0;
+  let ap2 = (m[6]||m[3]||'').toLowerCase(); // Use first am/pm if second not specified
+  
+  // Convert to 24-hour format
+  if(ap1 === 'pm' && h1 !== 12) h1 += 12;
+  if(ap1 === 'am' && h1 === 12) h1 = 0;
+  if(ap2 === 'pm' && h2 !== 12) h2 += 12;
+  if(ap2 === 'am' && h2 === 12) h2 = 0;
+  
+  return {
+    start: h1*60 + min1,
+    end: h2*60 + min2
+  };
+}
+
 function parseStartMinutes(timeStr){
-  if(!timeStr) return 9999;
-  const m = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm|-)?\s*(\d{1,2})?:?(\d{2})?\s*(am|pm)?/i);
-  if(!m) return 9999;
-  let h = parseInt(m[1],10);
-  const ap = (m[3]||'').toLowerCase();
-  if(ap === 'pm' && h !== 12) h += 12;
-  if(ap === 'am' && h === 12) h = 0;
-  return h*60;
+  // For backwards compatibility
+  const {start} = parseTime(timeStr);
+  return start;
 }
 
 /* Excel export */
