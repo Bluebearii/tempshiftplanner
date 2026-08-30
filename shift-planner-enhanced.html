@@ -479,7 +479,7 @@ function showEditForm(empId){
       <div class="color-pick" id="colorPick"></div>
     </div>
     <div class="form-field">
-      <label style="font-size:12px; margin-bottom:10px; display:block;">Availability by Day (e.g. 10:30am-5pm)</label>
+      <label style="font-size:12px; margin-bottom:10px; display:block;">Availability by Day (e.g. 10:30am-5pm or "All")</label>
       <div class="days-table">`;
   
   const dayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -491,7 +491,7 @@ function showEditForm(empId){
       <div class="day-line">
         <input type="checkbox" id="day-${idx}" ${avail ? 'checked' : ''}>
         <div class="dname">${day}</div>
-        <input type="text" id="time-${idx}" value="${avail}" placeholder="10:30am-5pm" ${!avail ? 'disabled' : ''}>
+        <input type="text" id="time-${idx}" value="${avail}" placeholder='10:30am-5pm or "All"' ${!avail ? 'disabled' : ''}>
       </div>`;
   });
   
@@ -918,6 +918,13 @@ document.getElementById('todayBtn').onclick = ()=>{
 function parseTime(timeStr){
   // Returns {start: minutes, end: minutes} for a time range like "3pm-9pm" or "3-9"
   if(!timeStr) return {start: 9999, end: 9999};
+  
+  // Check for "All day" keywords - treat as 6am to 11pm (matches calendar range)
+  const lower = timeStr.trim().toLowerCase();
+  if(lower === 'all' || lower === 'all day' || lower === 'anytime' || 
+     lower === 'any' || lower === 'full day' || lower === 'open'){
+    return {start: 6*60, end: 23*60};
+  }
   
   const m = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?\s*-\s*(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
   if(!m) return {start: 9999, end: 9999};
