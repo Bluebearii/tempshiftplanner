@@ -320,10 +320,6 @@
         <div class="info-list" id="coverageSummary"></div>
       </div>
       <div class="info-card">
-        <div class="info-title">Peak Availability Hours</div>
-        <div class="info-list" id="peakHours"></div>
-      </div>
-      <div class="info-card">
         <div class="info-title">Coverage Gaps</div>
         <div class="info-list" id="gapsList"></div>
       </div>
@@ -780,37 +776,6 @@ function updateCalendarInfo(){
   });
   document.getElementById('coverageSummary').innerHTML = coverageHtml || '<div class="empty-note">No availability set</div>';
 
-  // Peak availability hours (which hours have the most people available across the week)
-  const hourCounts = {};
-  for(let h = 6; h < 23; h++) hourCounts[h] = 0;
-  
-  dates.forEach(d=>{
-    const dayKey = dayShortcuts[d.getDay()];
-    employees.forEach(emp=>{
-      if(emp.dayAvailability && emp.dayAvailability[dayKey]){
-        const {start, end} = parseTime(emp.dayAvailability[dayKey]);
-        if(start === 9999) return;
-        for(let h = 6; h < 23; h++){
-          const hMin = h*60;
-          if(start <= hMin && end > hMin) hourCounts[h]++;
-        }
-      }
-    });
-  });
-
-  let peakHtml = '';
-  const sortedHours = Object.entries(hourCounts)
-    .filter(([h,c]) => c > 0)
-    .sort((a,b) => b[1] - a[1])
-    .slice(0, 5);
-  
-  sortedHours.forEach(([h, count])=>{
-    const hour = parseInt(h);
-    const time = hour < 12 ? `${hour}am` : (hour === 12 ? '12pm' : `${hour-12}pm`);
-    peakHtml += `<div class="info-item">${time}: ${count} staff-slots available</div>`;
-  });
-  document.getElementById('peakHours').innerHTML = peakHtml || '<div class="empty-note">No availability set</div>';
-
   // Coverage gaps (days with nobody available)
   let gapsHtml = '';
   dates.forEach(d=>{
@@ -919,11 +884,11 @@ function parseTime(timeStr){
   // Returns {start: minutes, end: minutes} for a time range like "3pm-9pm" or "3-9"
   if(!timeStr) return {start: 9999, end: 9999};
   
-  // Check for "All day" keywords - treat as 10am-9pm matches calendar range)
+  // Check for "All day" keywords - treat as 6am to 11pm (matches calendar range)
   const lower = timeStr.trim().toLowerCase();
   if(lower === 'all' || lower === 'all day' || lower === 'anytime' || 
      lower === 'any' || lower === 'full day' || lower === 'open'){
-  return {start: 10*60 + 30, end: 21*60};
+    return {start: 6*60, end: 23*60};
   }
   
   const m = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?\s*-\s*(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
