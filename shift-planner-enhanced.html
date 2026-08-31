@@ -594,52 +594,81 @@ function showEditForm(empId){
   });
 
   const colorPick = document.getElementById('colorPick');
+  let anySelected = false;
   COLORS.forEach(c=>{
     const dot = document.createElement('div');
-    dot.className = 'color-dot' + (c===emp.color ? ' sel' : '');
+    // Match by hex OR by converted rgb string
+    const isMatch = (c === emp.color) || (hexToRgbString(c) === emp.color);
+    if(isMatch) anySelected = true;
+    dot.className = 'color-dot' + (isMatch ? ' sel' : '');
     dot.style.background = c;
+    dot.dataset.color = c; // Store hex for reliable retrieval
     dot.onclick = ()=>{
       colorPick.querySelectorAll('.color-dot').forEach(d=>d.classList.remove('sel'));
       dot.classList.add('sel');
     };
     colorPick.appendChild(dot);
   });
+  // If no color matched, select the first one so save doesn't crash
+  if(!anySelected){
+    const first = colorPick.querySelector('.color-dot');
+    if(first) first.classList.add('sel');
+  }
+}
+
+// Helper to convert hex to "rgb(r, g, b)" format for comparison
+function hexToRgbString(hex){
+  if(!hex || !hex.startsWith('#')) return hex;
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 async function updateEmployee(empId){
   const emp = employees.find(e=>e.id===empId);
   if(!emp) return;
-  emp.name = document.getElementById('empName').value.trim() || 'Unnamed';
-  emp.color = document.querySelector('.color-dot.sel').style.background;
-  emp.notes = document.getElementById('empNotes').value;
   
-  // Save day availability
-  emp.dayAvailability = {};
-  const dayShortcuts = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const emptyDays = [];
-  
-  dayShortcuts.forEach((day, idx)=>{
-    const checkbox = document.getElementById(`day-${idx}`);
-    if(checkbox && checkbox.checked){
-      const timeInput = document.getElementById(`time-${idx}`);
-      const timeValue = timeInput.value.trim();
-      if(timeValue === ''){
-        emptyDays.push(dayNames[idx]);
-      } else {
-        emp.dayAvailability[day] = timeValue;
+  try {
+    emp.name = document.getElementById('empName').value.trim() || 'Unnamed';
+    
+    // Safely get selected color (don't crash if none selected)
+    const selDot = document.querySelector('.color-dot.sel');
+    if(selDot) emp.color = selDot.dataset.color || selDot.style.background;
+    
+    emp.notes = document.getElementById('empNotes').value;
+    
+    // Save day availability
+    emp.dayAvailability = {};
+    const dayShortcuts = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const emptyDays = [];
+    
+    dayShortcuts.forEach((day, idx)=>{
+      const checkbox = document.getElementById(`day-${idx}`);
+      if(checkbox && checkbox.checked){
+        const timeInput = document.getElementById(`time-${idx}`);
+        const timeValue = timeInput.value.trim();
+        if(timeValue === ''){
+          emptyDays.push(dayNames[idx]);
+        } else {
+          emp.dayAvailability[day] = timeValue;
+        }
       }
+    });
+    
+    if(emptyDays.length > 0){
+      const proceed = confirm(`These days are checked but have no time set: ${emptyDays.join(', ')}\n\nContinue saving? (These days will be ignored)`);
+      if(!proceed) return;
     }
-  });
-  
-  if(emptyDays.length > 0){
-    const proceed = confirm(`These days are checked but have no time set: ${emptyDays.join(', ')}\n\nContinue saving? (These days will be ignored)`);
-    if(!proceed) return;
+    
+    await saveSchedule(true); // Show toast
+    renderSidebar();
+    renderWeek();
+  } catch(err) {
+    console.error('Save error:', err);
+    showSaveToast('⚠ Save error: ' + err.message, true);
   }
-  
-  await saveSchedule(true); // Show toast
-  renderSidebar();
-  renderWeek();
 }
 
 function deleteEmployee(empId){
