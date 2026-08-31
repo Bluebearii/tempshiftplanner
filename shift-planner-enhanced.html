@@ -409,27 +409,75 @@ async function loadState(){
   }
 }
 
-async function saveSchedule(){
+async function saveSchedule(showToast = false){
   const state = { employees, schedule };
   // Always save to localStorage as backup
   localStorage.setItem('shiftPlannerState', JSON.stringify(state));
   
   if(USE_SERVER){
+    isSaving = true;
     try {
-      await fetch('/api/data', {
+      const res = await fetch('/api/data', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(state)
       });
+      lastSaveTime = Date.now();
+      if(showToast){
+        if(res.ok){
+          showSaveToast('✓ Saved');
+        } else {
+          showSaveToast('⚠ Save failed', true);
+        }
+      }
     } catch(e){
       console.warn('Failed to save to server', e);
+      if(showToast) showSaveToast('⚠ Save failed', true);
+    } finally {
+      isSaving = false;
     }
+  } else if(showToast){
+    showSaveToast('✓ Saved locally');
   }
 }
 
+function showSaveToast(message, isError = false){
+  // Remove any existing toast
+  document.querySelectorAll('.save-toast').forEach(t=>t.remove());
+  
+  const toast = document.createElement('div');
+  toast.className = 'save-toast';
+  toast.textContent = message;
+  toast.style.cssText = `
+    position:fixed;top:20px;right:20px;
+    background:${isError ? '#b1352b' : '#3f7a5c'};
+    color:white;padding:12px 20px;border-radius:8px;
+    font-weight:600;font-size:14px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.2);
+    z-index:9999;
+    animation:slideIn 0.2s ease-out;
+  `;
+  document.body.appendChild(toast);
+  setTimeout(()=>{
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s';
+    setTimeout(()=>toast.remove(), 300);
+  }, 2000);
+}
+
 // Auto-refresh from server every 10 seconds when on server
+let isSaving = false;
+let lastSaveTime = 0;
 if(USE_SERVER){
   setInterval(async ()=>{
+    // Skip refresh if user is actively editing an employee
+    const editPanel = document.getElementById('editPanel');
+    if(editPanel && editPanel.innerHTML.trim() !== '') return;
+    // Skip if we just saved (avoid overwriting our own changes)
+    if(Date.now() - lastSaveTime < 3000) return;
+    // Skip if a save is in progress
+    if(isSaving) return;
+    
     try {
       const res = await fetch('/api/data');
       if(res.ok){
@@ -558,7 +606,7 @@ function showEditForm(empId){
   });
 }
 
-function updateEmployee(empId){
+async function updateEmployee(empId){
   const emp = employees.find(e=>e.id===empId);
   if(!emp) return;
   emp.name = document.getElementById('empName').value.trim() || 'Unnamed';
@@ -568,15 +616,28 @@ function updateEmployee(empId){
   // Save day availability
   emp.dayAvailability = {};
   const dayShortcuts = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const emptyDays = [];
+  
   dayShortcuts.forEach((day, idx)=>{
     const checkbox = document.getElementById(`day-${idx}`);
     if(checkbox && checkbox.checked){
       const timeInput = document.getElementById(`time-${idx}`);
-      emp.dayAvailability[day] = timeInput.value.trim();
+      const timeValue = timeInput.value.trim();
+      if(timeValue === ''){
+        emptyDays.push(dayNames[idx]);
+      } else {
+        emp.dayAvailability[day] = timeValue;
+      }
     }
   });
   
-  saveSchedule();
+  if(emptyDays.length > 0){
+    const proceed = confirm(`These days are checked but have no time set: ${emptyDays.join(', ')}\n\nContinue saving? (These days will be ignored)`);
+    if(!proceed) return;
+  }
+  
+  await saveSchedule(true); // Show toast
   renderSidebar();
   renderWeek();
 }
@@ -607,6 +668,7 @@ document.getElementById('addEmpBtn').onclick = async ()=>{
   employees.push(emp);
   await saveSchedule();
   renderSidebar();
+  showEditForm(emp.id); // Auto-open edit form so user can set availability
 };
 
 function renderWeek(){

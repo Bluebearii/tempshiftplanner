@@ -18,7 +18,7 @@ const CACHE_TIME = 5000; // 5 seconds
 // Load from JSONBin
 async function loadFromJSONBin() {
   if (!JSONBIN_MASTER_KEY || !JSONBIN_BIN_ID) {
-    console.warn('JSONBin credentials not set - using in-memory only');
+    console.warn('⚠️  JSONBin credentials not set - using in-memory only (data will be lost on restart!)');
     return;
   }
   
@@ -30,9 +30,9 @@ async function loadFromJSONBin() {
       const data = await res.json();
       appData = data.record || { employees: [], schedule: {} };
       lastFetch = Date.now();
-      console.log('Loaded data from JSONBin');
+      console.log('✓ Loaded data from JSONBin');
     } else {
-      console.error('JSONBin load failed:', res.status);
+      console.error('JSONBin load failed:', res.status, await res.text());
     }
   } catch (err) {
     console.error('JSONBin load error:', err.message);
@@ -41,7 +41,7 @@ async function loadFromJSONBin() {
 
 // Save to JSONBin
 async function saveToJSONBin() {
-  if (!JSONBIN_MASTER_KEY || !JSONBIN_BIN_ID) return;
+  if (!JSONBIN_MASTER_KEY || !JSONBIN_BIN_ID) return false;
   
   try {
     const res = await fetch(JSONBIN_URL, {
@@ -53,12 +53,16 @@ async function saveToJSONBin() {
       body: JSON.stringify(appData)
     });
     if (res.ok) {
-      console.log('Saved to JSONBin');
+      lastFetch = Date.now(); // Mark cache as fresh since we just wrote
+      console.log('✓ Saved to JSONBin');
+      return true;
     } else {
-      console.error('JSONBin save failed:', res.status);
+      console.error('JSONBin save failed:', res.status, await res.text());
+      return false;
     }
   } catch (err) {
     console.error('JSONBin save error:', err.message);
+    return false;
   }
 }
 
@@ -76,8 +80,22 @@ app.get('/api/data', async (req, res) => {
 
 app.post('/api/data', async (req, res) => {
   appData = req.body;
-  await saveToJSONBin();
-  res.json({ success: true, timestamp: Date.now() });
+  const saved = await saveToJSONBin();
+  res.json({ 
+    success: true, 
+    persisted: saved,
+    timestamp: Date.now() 
+  });
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    jsonbinConfigured: !!JSONBIN_MASTER_KEY && !!JSONBIN_BIN_ID,
+    employeeCount: appData.employees.length,
+    lastFetch: lastFetch
+  });
 });
 
 // Serve HTML
