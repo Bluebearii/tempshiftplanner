@@ -172,16 +172,41 @@
   .add-shift:hover{border-color:var(--accent);color:var(--accent);}
 
   .assign-pop{
-    position:absolute;background:var(--card);border:1px solid var(--line);border-radius:8px;
-    box-shadow:0 8px 24px rgba(0,0,0,.14);padding:8px;z-index:50;min-width:220px;
+    position:fixed;background:var(--card);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.25);padding:0;z-index:1000;min-width:280px;
+    top:50%;left:50%;transform:translate(-50%,-50%);
+    overflow:hidden;
   }
+  .assign-pop-header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:12px 14px;border-bottom:1px solid var(--line);
+    background:#faf8f4;
+  }
+  .assign-pop-title{
+    font-size:13px;font-weight:700;color:var(--ink);
+  }
+  .assign-pop-close{
+    background:transparent;border:none;font-size:22px;line-height:1;
+    color:var(--ink-soft);cursor:pointer;padding:0;width:26px;height:26px;
+    border-radius:50%;display:flex;align-items:center;justify-content:center;
+    transition:all .15s;
+  }
+  .assign-pop-close:hover{
+    background:var(--line);color:var(--ink);
+  }
+  .assign-pop-body{padding:10px;}
   .assign-pop .opt{
-    display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;
+    display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;
   }
   .assign-pop .opt:hover{background:var(--accent-soft);}
-  .assign-pop select, .assign-pop input[type=text]{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;margin-top:6px;}
-  .assign-pop .go{margin-top:6px;width:100%;padding:6px;border-radius:6px;border:none;background:var(--ink);color:#fff;font-size:12px;cursor:pointer;font-weight:700;}
-  .assign-pop label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;display:block;margin-top:6px;}
+  .assign-pop select, .assign-pop input[type=text]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px;margin-top:6px;}
+  .assign-pop .go{margin-top:10px;width:100%;padding:9px;border-radius:6px;border:none;background:var(--ink);color:#fff;font-size:13px;cursor:pointer;font-weight:700;}
+  .assign-pop .go:hover{background:var(--accent);}
+  .assign-pop label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:700;display:block;margin-top:10px;margin-bottom:2px;}
+  
+  .pop-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:999;
+  }
 
   .empty-note{color:var(--ink-soft);font-size:13px;text-align:center;padding:20px 6px;}
   .overlay{position:fixed;inset:0;z-index:40;}
@@ -808,28 +833,49 @@ function removeShift(iso, empId){
 function showAssignPopover(iso, d){
   closePopovers();
   const weekday = DAY_NAMES[d.getDay()].toLowerCase();
+  const dateLabel = `${DAY_NAMES[d.getDay()]}, ${d.getMonth()+1}/${d.getDate()}`;
+  
+  // Backdrop that closes on click
+  const backdrop = document.createElement('div');
+  backdrop.className = 'pop-backdrop';
+  backdrop.onclick = closePopovers;
+  document.body.appendChild(backdrop);
+  
   let pop = document.createElement('div');
   pop.className = 'assign-pop';
-  pop.style.top = '100px';
-  pop.style.left = '50%';
-  pop.style.transform = 'translateX(-50%)';
 
-  let html = '<div>';
-  employees.forEach(emp=>{
-    html += `<div class="opt" data-id="${emp.id}">
-      <div class="swatch" style="background:${emp.color}"></div>
-      <div>${emp.name}</div>
+  let html = `
+    <div class="assign-pop-header">
+      <div class="assign-pop-title">Add shift — ${dateLabel}</div>
+      <button class="assign-pop-close" title="Close">×</button>
+    </div>
+    <div class="assign-pop-body">
+      <label style="margin-top:0">Team member</label>`;
+  
+  if(employees.length === 0){
+    html += `<div style="padding:12px;color:var(--ink-soft);font-size:13px;text-align:center;">
+      No team members yet. Add one in the sidebar first.
     </div>`;
-  });
-  html += `
-    <label>Time</label>
-    <input type="text" id="pop-time" placeholder="9am-5pm or 9-17">
-    <button class="go" id="pop-go">Add shift</button>
-  </div>`;
+  } else {
+    employees.forEach(emp=>{
+      html += `<div class="opt" data-id="${emp.id}">
+        <div class="swatch" style="background:${emp.color}"></div>
+        <div>${emp.name}</div>
+      </div>`;
+    });
+    html += `
+      <label>Time</label>
+      <input type="text" id="pop-time" placeholder="9am-5pm">
+      <button class="go" id="pop-go">Add shift</button>`;
+  }
+  html += `</div>`;
   
   pop.innerHTML = html;
   document.body.appendChild(pop);
   pop.onclick = (e)=> e.stopPropagation();
+
+  // Close button
+  pop.querySelector('.assign-pop-close').onclick = closePopovers;
 
   let selectedId = null;
   pop.querySelectorAll('.opt').forEach(opt=>{
@@ -840,19 +886,32 @@ function showAssignPopover(iso, d){
     };
   });
 
-  pop.querySelector('#pop-go').onclick = async ()=>{
-    if(!selectedId){ alert('Pick a team member'); return; }
-    const time = document.getElementById('pop-time').value.trim();
-    if(!schedule[iso]) schedule[iso] = [];
-    schedule[iso].push({ employeeId: selectedId, time });
-    await saveSchedule();
-    closePopovers();
-    renderWeek();
+  const goBtn = pop.querySelector('#pop-go');
+  if(goBtn){
+    goBtn.onclick = async ()=>{
+      if(!selectedId){ alert('Pick a team member'); return; }
+      const time = document.getElementById('pop-time').value.trim();
+      if(!schedule[iso]) schedule[iso] = [];
+      schedule[iso].push({ employeeId: selectedId, time });
+      await saveSchedule();
+      closePopovers();
+      renderWeek();
+    };
+  }
+  
+  // Close on Escape key
+  const escHandler = (e)=>{
+    if(e.key === 'Escape'){
+      closePopovers();
+      document.removeEventListener('keydown', escHandler);
+    }
   };
+  document.addEventListener('keydown', escHandler);
 }
 
 function closePopovers(){
   document.querySelectorAll('.assign-pop').forEach(p=>p.remove());
+  document.querySelectorAll('.pop-backdrop').forEach(b=>b.remove());
 }
 
 /* Tab switching */
