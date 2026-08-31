@@ -919,11 +919,11 @@ function parseTime(timeStr){
   // Returns {start: minutes, end: minutes} for a time range like "3pm-9pm" or "3-9"
   if(!timeStr) return {start: 9999, end: 9999};
   
-  // Check for "All day" keywords - treat as 6am to 11pm (matches calendar range)
+  // Check for "All day" keywords - treat as 10am-9pm matches calendar range)
   const lower = timeStr.trim().toLowerCase();
   if(lower === 'all' || lower === 'all day' || lower === 'anytime' || 
      lower === 'any' || lower === 'full day' || lower === 'open'){
-    return {start: 6*60, end: 23*60};
+  return {start: 10*60 + 30, end: 21*60};
   }
   
   const m = timeStr.match(/(\d{1,2}):?(\d{2})?\s*(am|pm)?\s*-\s*(\d{1,2}):?(\d{2})?\s*(am|pm)?/i);
